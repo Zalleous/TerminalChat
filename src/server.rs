@@ -83,6 +83,7 @@ async fn handle_client(
         while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
             let trimmed = line.trim();
             if !trimmed.is_empty() {
+                // Create message and send as JSON
                 let msg = Message::new_text(username_for_reader.clone(), trimmed.to_string());
                 let _ = broadcast_tx_for_reader.send(msg.to_json().unwrap_or_default());
             }

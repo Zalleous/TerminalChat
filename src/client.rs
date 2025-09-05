@@ -46,10 +46,8 @@ pub async fn start_client(
     let username_owned = username.to_string();
     tokio::spawn(async move {
         while let Some(text) = rx.recv().await {
-            let msg = Message::new_text(username_owned.clone(), text);
-            if let Ok(json) = msg.to_json() {
-                let _ = writer.write_all(format!("{}\n", json).as_bytes()).await;
-            }
+            // Send raw text instead of JSON to server
+            let _ = writer.write_all(format!("{}\n", text).as_bytes()).await;
         }
     });
 

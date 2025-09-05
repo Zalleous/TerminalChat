@@ -164,6 +164,7 @@ impl ChatUI {
         self.messages.push(formatted);
     }
 
+    #[allow(dead_code)]
     fn format_time(&self, time: SystemTime) -> String {
         if let Ok(duration) = time.duration_since(UNIX_EPOCH) {
             let secs = duration.as_secs();
