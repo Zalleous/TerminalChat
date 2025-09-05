@@ -109,10 +109,12 @@ impl ChatUI {
         execute!(io::stdout(), crossterm::cursor::MoveTo(0, 0))?;
 
         // Draw title
-        println!("Terminal Chat - {} (Ctrl+Q to quit)", self.username);
-        println!("{}", "=".repeat(width as usize));
+        let title = format!("Terminal Chat - {} (Ctrl+Q to quit)", self.username);
+        print!("{}", title);
+        execute!(io::stdout(), crossterm::cursor::MoveTo(0, 1))?;
+        print!("{}", "=".repeat(width as usize));
 
-        // Draw messages (leave space for input at bottom)
+        // Draw messages (leave space for title, separator, input separator, and input)
         let message_height = height.saturating_sub(4) as usize;
         let start_idx = if self.messages.len() > message_height {
             self.messages.len() - message_height
@@ -120,13 +122,16 @@ impl ChatUI {
             0
         };
 
-        for msg in &self.messages[start_idx..] {
-            println!("{}", msg);
+        for (i, msg) in self.messages[start_idx..].iter().enumerate() {
+            execute!(io::stdout(), crossterm::cursor::MoveTo(0, (i + 2) as u16))?;
+            print!("{}", msg);
         }
 
-        // Move to input line
+        // Move to input separator line
         execute!(io::stdout(), crossterm::cursor::MoveTo(0, height - 2))?;
-        println!("{}", "=".repeat(width as usize));
+        print!("{}", "=".repeat(width as usize));
+        
+        // Move to input line
         execute!(io::stdout(), crossterm::cursor::MoveTo(0, height - 1))?;
         print!("> {}", self.input);
         

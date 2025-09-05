@@ -39,26 +39,28 @@ pub async fn start_server(port: u16) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn handle_client(
-    mut socket: TcpStream,
+    socket: TcpStream,
     clients: Clients,
     broadcast_tx: broadcast::Sender<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let client_id = Uuid::new_v4();
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let mut broadcast_rx = broadcast_tx.subscribe();
 
+    // Split the socket for reading and writing
+    let (reader, mut writer) = socket.into_split();
+    let mut reader = BufReader::new(reader);
+
     // Read username from first message
-    let mut reader = BufReader::new(&mut socket);
     let mut username_line = String::new();
     reader.read_line(&mut username_line).await?;
     let username = username_line.trim().to_string();
 
-    // Add client to the map
+    // Add client to the map (we'll remove the unused sender field later)
     {
         let mut clients_guard = clients.lock().await;
         clients_guard.insert(client_id, ClientInfo {
             username: username.clone(),
-            sender: tx.clone(),
+            sender: tokio::sync::mpsc::unbounded_channel().0, // Placeholder
         });
     }
 
@@ -68,15 +70,14 @@ async fn handle_client(
 
     // Send welcome message
     let welcome_msg = Message::new_system(format!("Welcome to the chat, {}!", username));
-    socket.write_all(format!("{}\n", welcome_msg.to_json()?).as_bytes()).await?;
+    writer.write_all(format!("{}\n", welcome_msg.to_json()?).as_bytes()).await?;
 
     // Handle incoming messages from this client
-    let clients_for_reader = clients.clone();
     let broadcast_tx_for_reader = broadcast_tx.clone();
     let username_for_reader = username.clone();
+    let clients_for_reader = clients.clone();
     
     tokio::spawn(async move {
-        let mut reader = BufReader::new(socket);
         let mut line = String::new();
         
         while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
@@ -98,36 +99,14 @@ async fn handle_client(
 
     // Handle outgoing messages to this client
     loop {
-        tokio::select! {
-            // Messages from other clients
-            msg = broadcast_rx.recv() => {
-                match msg {
-                    Ok(json_msg) => {
-                        if let Ok(msg) = Message::from_json(&json_msg) {
-                            // Don't echo back messages from this user
-                            let should_send = match &msg {
-                                Message::Text { username: msg_username, .. } => msg_username != &username,
-                                _ => true,
-                            };
-                            
-                            if should_send {
-                                let _ = tx.send(json_msg.clone());
-                            }
-                        }
-                    }
-                    Err(_) => break,
+        match broadcast_rx.recv().await {
+            Ok(json_msg) => {
+                // Send all messages to this client (including their own for now)
+                if writer.write_all(format!("{}\n", json_msg).as_bytes()).await.is_err() {
+                    break;
                 }
             }
-            // Messages to send to this specific client
-            msg = rx.recv() => {
-                match msg {
-                    Some(_json_msg) => {
-                        // Send to client (this would need the socket, which we'd need to restructure for)
-                        // For now, we'll handle this in the broadcast loop above
-                    }
-                    None => break,
-                }
-            }
+            Err(_) => break,
         }
     }
 
