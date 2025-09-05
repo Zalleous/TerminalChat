@@ -148,7 +148,7 @@ impl ChatUI {
         execute!(io::stdout(), crossterm::cursor::MoveTo(0, 0))?;
 
         // Draw title
-        let title = format!("Terminal Chat - {} (Ctrl+Q: quit, /file <path>: send, F1: files, Ctrl+C: copy)", self.username);
+        let title = format!("Terminal Chat - {} (Ctrl+Q: quit, /file <path>: send, F1: files, Ctrl+C: copy, /test-clipboard)", self.username);
         print!("{}", title);
         execute!(io::stdout(), crossterm::cursor::MoveTo(0, 1))?;
         print!("{}", "=".repeat(width as usize));
@@ -327,6 +327,8 @@ impl ChatUI {
                     // Check if it's a file command
                     if text.starts_with("/file ") {
                         self.handle_file_command(&text[6..]).await?;
+                    } else if text.starts_with("/test-clipboard") {
+                        self.test_clipboard_functionality()?;
                     } else {
                         // Send regular message
                         let _ = self.message_sender.send(text);
@@ -481,22 +483,7 @@ impl ChatUI {
     }
 
     fn copy_to_system_clipboard(&self, text: &str) -> Result<(), Box<dyn Error>> {
-        // Try arboard first
-        match Clipboard::new() {
-            Ok(mut clipboard) => {
-                match clipboard.set_text(text.to_string()) {
-                    Ok(_) => return Ok(()),
-                    Err(e) => {
-                        eprintln!("Arboard clipboard failed: {}", e);
-                    }
-                }
-            }
-            Err(e) => {
-                eprintln!("Failed to create arboard clipboard: {}", e);
-            }
-        }
-
-        // Fallback to system commands
+        // Try system commands first as they're more reliable
         #[cfg(target_os = "linux")]
         {
             // Try xclip first
@@ -506,12 +493,15 @@ impl ChatUI {
                 .stdin(std::process::Stdio::piped())
                 .spawn()
             {
-                if let Some(stdin) = child.stdin.as_mut() {
+                if let Some(mut stdin) = child.stdin.take() {
                     use std::io::Write;
-                    if stdin.write_all(text.as_bytes()).is_ok() {
-                        drop(stdin);
-                        if child.wait().is_ok() {
-                            return Ok(());
+                    if let Ok(_) = stdin.write_all(text.as_bytes()) {
+                        // Explicitly close stdin
+                        std::mem::drop(stdin);
+                        if let Ok(status) = child.wait() {
+                            if status.success() {
+                                return Ok(());
+                            }
                         }
                     }
                 }
@@ -524,12 +514,34 @@ impl ChatUI {
                 .stdin(std::process::Stdio::piped())
                 .spawn()
             {
-                if let Some(stdin) = child.stdin.as_mut() {
+                if let Some(mut stdin) = child.stdin.take() {
                     use std::io::Write;
-                    if stdin.write_all(text.as_bytes()).is_ok() {
-                        drop(stdin);
-                        if child.wait().is_ok() {
-                            return Ok(());
+                    if let Ok(_) = stdin.write_all(text.as_bytes()) {
+                        // Explicitly close stdin
+                        std::mem::drop(stdin);
+                        if let Ok(status) = child.wait() {
+                            if status.success() {
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Try wl-copy for Wayland
+            if let Ok(mut child) = Command::new("wl-copy")
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                if let Some(mut stdin) = child.stdin.take() {
+                    use std::io::Write;
+                    if let Ok(_) = stdin.write_all(text.as_bytes()) {
+                        // Explicitly close stdin
+                        std::mem::drop(stdin);
+                        if let Ok(status) = child.wait() {
+                            if status.success() {
+                                return Ok(());
+                            }
                         }
                     }
                 }
@@ -542,12 +554,15 @@ impl ChatUI {
                 .stdin(std::process::Stdio::piped())
                 .spawn()
             {
-                if let Some(stdin) = child.stdin.as_mut() {
+                if let Some(mut stdin) = child.stdin.take() {
                     use std::io::Write;
-                    if stdin.write_all(text.as_bytes()).is_ok() {
-                        drop(stdin);
-                        if child.wait().is_ok() {
-                            return Ok(());
+                    if let Ok(_) = stdin.write_all(text.as_bytes()) {
+                        // Explicitly close stdin
+                        std::mem::drop(stdin);
+                        if let Ok(status) = child.wait() {
+                            if status.success() {
+                                return Ok(());
+                            }
                         }
                     }
                 }
@@ -560,19 +575,50 @@ impl ChatUI {
                 .stdin(std::process::Stdio::piped())
                 .spawn()
             {
-                if let Some(stdin) = child.stdin.as_mut() {
+                if let Some(mut stdin) = child.stdin.take() {
                     use std::io::Write;
-                    if stdin.write_all(text.as_bytes()).is_ok() {
-                        drop(stdin);
-                        if child.wait().is_ok() {
-                            return Ok(());
+                    if let Ok(_) = stdin.write_all(text.as_bytes()) {
+                        // Explicitly close stdin
+                        std::mem::drop(stdin);
+                        if let Ok(status) = child.wait() {
+                            if status.success() {
+                                return Ok(());
+                            }
                         }
                     }
                 }
             }
         }
 
-        Err("All clipboard methods failed".into())
+        // Try arboard as fallback
+        match Clipboard::new() {
+            Ok(mut clipboard) => {
+                match clipboard.set_text(text.to_string()) {
+                    Ok(_) => {
+                        // Verify the clipboard content
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        match clipboard.get_text() {
+                            Ok(clipboard_text) => {
+                                if clipboard_text == text {
+                                    return Ok(());
+                                } else {
+                                    return Err("Clipboard verification failed - content mismatch".into());
+                                }
+                            }
+                            Err(e) => {
+                                return Err(format!("Clipboard verification failed: {}", e).into());
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        return Err(format!("Arboard clipboard set failed: {}", e).into());
+                    }
+                }
+            }
+            Err(e) => {
+                return Err(format!("Failed to create arboard clipboard: {}", e).into());
+            }
+        }
     }
 
     fn copy_selection(&mut self) -> Result<(), Box<dyn Error>> {
@@ -618,23 +664,48 @@ impl ChatUI {
             if !selected_text.is_empty() {
                 // Debug: show what we're trying to copy
                 let debug_text = if selected_text.len() > 50 {
-                    format!("{}...", &selected_text[..50])
+                    format!("{}...", &selected_text[..50].replace('\n', "\\n"))
                 } else {
-                    selected_text.clone()
+                    selected_text.replace('\n', "\\n")
                 };
+                
+                self.messages.push(format!("* Attempting to copy: '{}'", debug_text));
                 
                 match self.copy_to_system_clipboard(&selected_text) {
                     Ok(_) => {
-                        self.messages.push(format!("* Copied to clipboard: '{}'", debug_text));
+                        self.messages.push("* Successfully copied to clipboard!".to_string());
+                        
+                        // Test if we can read it back
+                        if let Ok(mut clipboard) = Clipboard::new() {
+                            match clipboard.get_text() {
+                                Ok(clipboard_content) => {
+                                    if clipboard_content == selected_text {
+                                        self.messages.push("* Clipboard verification: SUCCESS".to_string());
+                                    } else {
+                                        self.messages.push("* Clipboard verification: FAILED - content differs".to_string());
+                                    }
+                                }
+                                Err(e) => {
+                                    self.messages.push(format!("* Clipboard read test failed: {}", e));
+                                }
+                            }
+                        }
                     }
                     Err(e) => {
                         self.messages.push(format!("* Failed to copy to clipboard: {}", e));
                         // Save to a temporary file as fallback
-                        match std::fs::write("/tmp/terminal_chat_selection.txt", &selected_text) {
+                        let fallback_path = if cfg!(windows) {
+                            "C:\\temp\\terminal_chat_selection.txt"
+                        } else {
+                            "/tmp/terminal_chat_selection.txt"
+                        };
+                        
+                        match std::fs::write(fallback_path, &selected_text) {
                             Ok(_) => {
-                                self.messages.push("* Text saved to /tmp/terminal_chat_selection.txt".to_string());
+                                self.messages.push(format!("* Text saved to {}", fallback_path));
                             }
-                            Err(_) => {
+                            Err(write_err) => {
+                                self.messages.push(format!("* Could not save to file: {}", write_err));
                                 self.messages.push(format!("* Selected text: '{}'", debug_text));
                             }
                         }
@@ -782,6 +853,39 @@ impl ChatUI {
         } else {
             "??:??:??".to_string()
         }
+    }
+
+    fn test_clipboard_functionality(&mut self) -> Result<(), Box<dyn Error>> {
+        let test_text = "Terminal Chat Clipboard Test";
+        self.messages.push("* Testing clipboard functionality...".to_string());
+        
+        match self.copy_to_system_clipboard(test_text) {
+            Ok(_) => {
+                self.messages.push("* Clipboard test: SUCCESS".to_string());
+                
+                // Try to read it back
+                if let Ok(mut clipboard) = Clipboard::new() {
+                    match clipboard.get_text() {
+                        Ok(content) => {
+                            if content == test_text {
+                                self.messages.push("* Clipboard read-back: SUCCESS".to_string());
+                            } else {
+                                self.messages.push(format!("* Clipboard read-back: FAILED - got '{}'", content));
+                            }
+                        }
+                        Err(e) => {
+                            self.messages.push(format!("* Clipboard read-back failed: {}", e));
+                        }
+                    }
+                } else {
+                    self.messages.push("* Could not create clipboard for read-back test".to_string());
+                }
+            }
+            Err(e) => {
+                self.messages.push(format!("* Clipboard test: FAILED - {}", e));
+            }
+        }
+        Ok(())
     }
 
     async fn handle_file_command(&mut self, filepath: &str) -> Result<(), Box<dyn Error>> {
