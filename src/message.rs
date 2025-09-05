@@ -38,6 +38,7 @@ impl Message {
         }
     }
 
+    #[allow(dead_code)]
     pub fn new_file(username: String, filename: String, data: Vec<u8>) -> Self {
         let size = data.len() as u64;
         Message::File {

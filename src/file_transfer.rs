@@ -3,9 +3,11 @@ use std::error::Error;
 use std::fs;
 use std::path::Path;
 
+#[allow(dead_code)]
 pub struct FileTransfer;
 
 impl FileTransfer {
+    #[allow(dead_code)]
     pub fn read_file(filepath: &str) -> Result<Message, Box<dyn Error>> {
         let path = Path::new(filepath);
         
@@ -24,6 +26,7 @@ impl FileTransfer {
         Ok(Message::new_file("user".to_string(), filename, data))
     }
 
+    #[allow(dead_code)]
     pub fn save_file(msg: &Message, download_dir: &str) -> Result<String, Box<dyn Error>> {
         if let Message::File { filename, data, .. } = msg {
             let download_path = Path::new(download_dir);
@@ -40,6 +43,7 @@ impl FileTransfer {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_file_info(filepath: &str) -> Result<(String, u64), Box<dyn Error>> {
         let path = Path::new(filepath);
         

@@ -10,6 +10,7 @@ type ClientId = Uuid;
 type Clients = Arc<Mutex<HashMap<ClientId, ClientInfo>>>;
 
 #[derive(Debug)]
+#[allow(dead_code)]
 struct ClientInfo {
     username: String,
     sender: tokio::sync::mpsc::UnboundedSender<String>,
