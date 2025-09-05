@@ -57,7 +57,7 @@ async fn handle_client(
         let mut clients_guard = clients.lock().await;
         clients_guard.insert(client_id, ClientInfo {
             username: username.clone(),
-            sender: tx,
+            sender: tx.clone(),
         });
     }
 
@@ -110,7 +110,7 @@ async fn handle_client(
                             };
                             
                             if should_send {
-                                let _ = tx.send(json_msg);
+                                let _ = tx.send(json_msg.clone());
                             }
                         }
                     }
@@ -120,7 +120,7 @@ async fn handle_client(
             // Messages to send to this specific client
             msg = rx.recv() => {
                 match msg {
-                    Some(json_msg) => {
+                    Some(_json_msg) => {
                         // Send to client (this would need the socket, which we'd need to restructure for)
                         // For now, we'll handle this in the broadcast loop above
                     }

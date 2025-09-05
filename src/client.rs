@@ -10,16 +10,19 @@ pub async fn start_client(
     port: u16,
     username: &str,
 ) -> Result<(), Box<dyn Error>> {
-    let mut stream = TcpStream::connect(format!("{}:{}", address, port)).await?;
+    let stream = TcpStream::connect(format!("{}:{}", address, port)).await?;
+    
+    // Split the stream for reading and writing
+    let (reader, mut writer) = stream.into_split();
     
     // Send username as first message
-    stream.write_all(format!("{}\n", username).as_bytes()).await?;
+    writer.write_all(format!("{}\n", username).as_bytes()).await?;
 
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
     let mut ui = ChatUI::new(username.to_string(), tx)?;
 
-    // Clone stream for reading
-    let mut reader = BufReader::new(&mut stream);
+    // Create a buffered reader
+    let mut reader = BufReader::new(reader);
 
     // Handle incoming messages from server
     let ui_tx = ui.get_sender();
@@ -37,11 +40,12 @@ pub async fn start_client(
     });
 
     // Handle outgoing messages to server
+    let username_owned = username.to_string();
     tokio::spawn(async move {
         while let Some(text) = rx.recv().await {
-            let msg = Message::new_text(username.to_string(), text);
+            let msg = Message::new_text(username_owned.clone(), text);
             if let Ok(json) = msg.to_json() {
-                let _ = stream.write_all(format!("{}\n", json).as_bytes()).await;
+                let _ = writer.write_all(format!("{}\n", json).as_bytes()).await;
             }
         }
     });
