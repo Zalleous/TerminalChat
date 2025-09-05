@@ -23,7 +23,7 @@ impl FileTransfer {
         let data = fs::read(path)?;
         
         // For now, we'll use a placeholder username - this should come from the caller
-        Ok(Message::new_file("user".to_string(), filename, data))
+        Ok(Message::new_file("unknown".to_string(), filename, data))
     }
 
     #[allow(dead_code)]

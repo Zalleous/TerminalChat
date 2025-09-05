@@ -26,12 +26,25 @@ pub async fn start_client(
 
     // Handle incoming messages from server
     let ui_tx = ui.get_sender();
+    let username_for_files = username.to_string();
     tokio::spawn(async move {
         let mut line = String::new();
         while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
             let trimmed = line.trim();
             if !trimmed.is_empty() {
                 if let Ok(msg) = Message::from_json(trimmed) {
+                    // Handle file messages and save them
+                    if let Message::File { filename, data, .. } = &msg {
+                        use crate::file_transfer::FileTransfer;
+                        match FileTransfer::save_file(&msg, "downloads") {
+                            Ok(saved_path) => {
+                                println!("File saved to: {}", saved_path);
+                            }
+                            Err(e) => {
+                                eprintln!("Error saving file {}: {}", filename, e);
+                            }
+                        }
+                    }
                     let _ = ui_tx.send(msg);
                 } else {
                     // If JSON parsing fails, treat as raw text (fallback)
@@ -43,7 +56,6 @@ pub async fn start_client(
     });
 
     // Handle outgoing messages to server
-    let username_owned = username.to_string();
     tokio::spawn(async move {
         while let Some(text) = rx.recv().await {
             // Send raw text instead of JSON to server

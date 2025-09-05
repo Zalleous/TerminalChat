@@ -83,9 +83,15 @@ async fn handle_client(
         while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
             let trimmed = line.trim();
             if !trimmed.is_empty() {
-                // Create message and send as JSON
-                let msg = Message::new_text(username_for_reader.clone(), trimmed.to_string());
-                let _ = broadcast_tx_for_reader.send(msg.to_json().unwrap_or_default());
+                // Check if it's a file message
+                if trimmed.starts_with("FILE:") {
+                    // Forward the file message as-is
+                    let _ = broadcast_tx_for_reader.send(trimmed[5..].to_string());
+                } else {
+                    // Create regular text message and send as JSON
+                    let msg = Message::new_text(username_for_reader.clone(), trimmed.to_string());
+                    let _ = broadcast_tx_for_reader.send(msg.to_json().unwrap_or_default());
+                }
             }
             line.clear();
         }

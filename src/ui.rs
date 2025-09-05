@@ -109,7 +109,7 @@ impl ChatUI {
         execute!(io::stdout(), crossterm::cursor::MoveTo(0, 0))?;
 
         // Draw title
-        let title = format!("Terminal Chat - {} (Ctrl+Q to quit)", self.username);
+        let title = format!("Terminal Chat - {} (Ctrl+Q to quit, /file <path> to send file)", self.username);
         print!("{}", title);
         execute!(io::stdout(), crossterm::cursor::MoveTo(0, 1))?;
         print!("{}", "=".repeat(width as usize));
@@ -144,27 +144,27 @@ impl ChatUI {
 
     fn add_message(&mut self, msg: Message) {
         let formatted = match msg {
-            Message::Text { username, content, .. } => {
-                format!("{}: {}", username, content)
+            Message::Text { username, content, timestamp } => {
+                format!("[{}] {}: {}", self.format_time(timestamp), username, content)
             }
-            Message::File { username, filename, size, .. } => {
-                format!("{} shared file: {} ({} bytes)", username, filename, size)
+            Message::File { username, filename, size, timestamp, .. } => {
+                format!("[{}] {} shared file: {} ({} bytes)", 
+                    self.format_time(timestamp), username, filename, size)
             }
-            Message::UserJoined { username, .. } => {
-                format!("* {} joined the chat", username)
+            Message::UserJoined { username, timestamp } => {
+                format!("[{}] * {} joined the chat", self.format_time(timestamp), username)
             }
-            Message::UserLeft { username, .. } => {
-                format!("* {} left the chat", username)
+            Message::UserLeft { username, timestamp } => {
+                format!("[{}] * {} left the chat", self.format_time(timestamp), username)
             }
-            Message::System { content, .. } => {
-                format!("* {}", content)
+            Message::System { content, timestamp } => {
+                format!("[{}] * {}", self.format_time(timestamp), content)
             }
         };
         
         self.messages.push(formatted);
     }
 
-    #[allow(dead_code)]
     fn format_time(&self, time: SystemTime) -> String {
         if let Ok(duration) = time.duration_since(UNIX_EPOCH) {
             let secs = duration.as_secs();
@@ -178,9 +178,20 @@ impl ChatUI {
     }
 
     async fn handle_file_command(&mut self, filepath: &str) -> Result<(), Box<dyn Error>> {
-        // This is a placeholder for file sharing functionality
-        // We'll implement this in file_transfer.rs
-        self.messages.push(format!("File sharing not yet implemented: {}", filepath));
+        use crate::file_transfer::FileTransfer;
+        
+        match FileTransfer::read_file(filepath) {
+            Ok(file_msg) => {
+                // Send the file message through the message sender
+                if let Ok(json) = file_msg.to_json() {
+                    let _ = self.message_sender.send(format!("FILE:{}", json));
+                }
+                self.messages.push(format!("Sending file: {}", filepath));
+            }
+            Err(e) => {
+                self.messages.push(format!("Error reading file {}: {}", filepath, e));
+            }
+        }
         Ok(())
     }
 }
