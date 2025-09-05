@@ -7,8 +7,6 @@ use crossterm::{
 use std::error::Error;
 use std::io;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use std::path::Path;
-use std::fs;
 use tokio::sync::mpsc;
 use arboard::Clipboard;
 use glob::glob;
@@ -105,10 +103,13 @@ impl ChatUI {
             if event::poll(Duration::from_millis(100))? {
                 match event::read()? {
                     Event::Key(key) if key.kind == KeyEventKind::Press => {
-                        match self.mode {
+                        let should_exit = match self.mode {
                             UIMode::Chat => self.handle_chat_key(key).await?,
                             UIMode::FileViewer => self.handle_file_viewer_key(key)?,
                             UIMode::FileList => self.handle_file_list_key(key)?,
+                        };
+                        if should_exit {
+                            break;
                         }
                     }
                     Event::Mouse(mouse) => {
@@ -191,7 +192,7 @@ impl ChatUI {
     }
 
     fn draw_file_list(&self) -> Result<(), Box<dyn Error>> {
-        let (width, height) = crossterm::terminal::size()?;
+        let (width, _height) = crossterm::terminal::size()?;
         
         execute!(io::stdout(), crossterm::terminal::Clear(crossterm::terminal::ClearType::All))?;
         execute!(io::stdout(), crossterm::cursor::MoveTo(0, 0))?;
@@ -251,28 +252,52 @@ impl ChatUI {
     }
 
     fn print_with_selection(&self, msg: &str, msg_idx: usize, start: (usize, usize), end: (usize, usize)) -> Result<(), Box<dyn Error>> {
-        if msg_idx == start.0 && msg_idx == end.0 {
+        // Normalize selection order (ensure start comes before end)
+        let (norm_start, norm_end) = if start.0 > end.0 || (start.0 == end.0 && start.1 > end.1) {
+            (end, start)
+        } else {
+            (start, end)
+        };
+        
+        // Check if this message is within the selection range
+        if msg_idx < norm_start.0 || msg_idx > norm_end.0 {
+            print!("{}", msg);
+            return Ok(());
+        }
+        
+        if msg_idx == norm_start.0 && msg_idx == norm_end.0 {
             // Selection within single message
-            let before = &msg[..start.1.min(msg.len())];
-            let selected = &msg[start.1.min(msg.len())..end.1.min(msg.len())];
-            let after = &msg[end.1.min(msg.len())..];
+            let start_char = norm_start.1.min(msg.len());
+            let end_char = norm_end.1.min(msg.len()).max(start_char);
+            
+            let before = &msg[..start_char];
+            let selected = &msg[start_char..end_char];
+            let after = &msg[end_char..];
             
             print!("{}", before);
-            print!("\x1b[7m{}\x1b[0m", selected); // Reverse video for selection
+            if !selected.is_empty() {
+                print!("\x1b[7m{}\x1b[0m", selected); // Reverse video for selection
+            }
             print!("{}", after);
-        } else if msg_idx == start.0 {
+        } else if msg_idx == norm_start.0 {
             // Start of multi-line selection
-            let before = &msg[..start.1.min(msg.len())];
-            let selected = &msg[start.1.min(msg.len())..];
+            let start_char = norm_start.1.min(msg.len());
+            let before = &msg[..start_char];
+            let selected = &msg[start_char..];
             
             print!("{}", before);
-            print!("\x1b[7m{}\x1b[0m", selected);
-        } else if msg_idx == end.0 {
+            if !selected.is_empty() {
+                print!("\x1b[7m{}\x1b[0m", selected);
+            }
+        } else if msg_idx == norm_end.0 {
             // End of multi-line selection
-            let selected = &msg[..end.1.min(msg.len())];
-            let after = &msg[end.1.min(msg.len())..];
+            let end_char = norm_end.1.min(msg.len());
+            let selected = &msg[..end_char];
+            let after = &msg[end_char..];
             
-            print!("\x1b[7m{}\x1b[0m", selected);
+            if !selected.is_empty() {
+                print!("\x1b[7m{}\x1b[0m", selected);
+            }
             print!("{}", after);
         } else {
             // Middle of multi-line selection
@@ -281,10 +306,10 @@ impl ChatUI {
         Ok(())
     }
 
-    async fn handle_chat_key(&mut self, key: crossterm::event::KeyEvent) -> Result<(), Box<dyn Error>> {
+    async fn handle_chat_key(&mut self, key: crossterm::event::KeyEvent) -> Result<bool, Box<dyn Error>> {
         match key.code {
             KeyCode::Char('q') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
-                std::process::exit(0);
+                return Ok(true); // Signal to exit
             }
             KeyCode::Char('c') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
                 self.copy_selection()?;
@@ -323,10 +348,10 @@ impl ChatUI {
             }
             _ => {}
         }
-        Ok(())
+        Ok(false) // Don't exit
     }
 
-    fn handle_file_list_key(&mut self, key: crossterm::event::KeyEvent) -> Result<(), Box<dyn Error>> {
+    fn handle_file_list_key(&mut self, key: crossterm::event::KeyEvent) -> Result<bool, Box<dyn Error>> {
         match key.code {
             KeyCode::Esc => {
                 self.mode = UIMode::Chat;
@@ -351,10 +376,10 @@ impl ChatUI {
             }
             _ => {}
         }
-        Ok(())
+        Ok(false) // Don't exit
     }
 
-    fn handle_file_viewer_key(&mut self, key: crossterm::event::KeyEvent) -> Result<(), Box<dyn Error>> {
+    fn handle_file_viewer_key(&mut self, key: crossterm::event::KeyEvent) -> Result<bool, Box<dyn Error>> {
         match key.code {
             KeyCode::Esc => {
                 self.mode = UIMode::FileList;
@@ -374,7 +399,7 @@ impl ChatUI {
             }
             _ => {}
         }
-        Ok(())
+        Ok(false) // Don't exit
     }
 
     fn handle_mouse_event(&mut self, mouse: MouseEvent) -> Result<(), Box<dyn Error>> {
@@ -394,19 +419,53 @@ impl ChatUI {
     }
 
     fn start_selection(&mut self, x: u16, y: u16) {
-        if y >= 2 {
-            let msg_index = (y - 2) as usize;
-            let char_index = x as usize;
-            self.selection_start = Some((msg_index, char_index));
-            self.selecting = true;
+        // Only allow selection in the message area (y >= 2 and below the separator)
+        let (_, height) = crossterm::terminal::size().unwrap_or((80, 24));
+        if y >= 2 && y < height.saturating_sub(2) {
+            // Calculate the actual message index based on scroll position
+            let message_height = height.saturating_sub(4) as usize;
+            let start_idx = if self.messages.len() > message_height {
+                self.messages.len() - message_height
+            } else {
+                0
+            };
+            
+            let relative_msg_index = (y - 2) as usize;
+            let actual_msg_index = start_idx + relative_msg_index;
+            
+            // Ensure we don't go beyond available messages
+            if actual_msg_index < self.messages.len() {
+                let char_index = x as usize;
+                self.selection_start = Some((actual_msg_index, char_index));
+                self.selecting = true;
+                self.selection_end = None; // Clear previous end selection
+            }
         }
     }
 
     fn update_selection(&mut self, x: u16, y: u16) {
-        if self.selecting && y >= 2 {
-            let msg_index = (y - 2) as usize;
-            let char_index = x as usize;
-            self.selection_end = Some((msg_index, char_index));
+        if !self.selecting {
+            return;
+        }
+        
+        let (_, height) = crossterm::terminal::size().unwrap_or((80, 24));
+        if y >= 2 && y < height.saturating_sub(2) {
+            // Calculate the actual message index based on scroll position
+            let message_height = height.saturating_sub(4) as usize;
+            let start_idx = if self.messages.len() > message_height {
+                self.messages.len() - message_height
+            } else {
+                0
+            };
+            
+            let relative_msg_index = (y - 2) as usize;
+            let actual_msg_index = start_idx + relative_msg_index;
+            
+            // Ensure we don't go beyond available messages
+            if actual_msg_index < self.messages.len() {
+                let char_index = x as usize;
+                self.selection_end = Some((actual_msg_index, char_index));
+            }
         }
     }
 
@@ -424,27 +483,33 @@ impl ChatUI {
         if let (Some(start), Some(end)) = (self.selection_start, self.selection_end) {
             let mut selected_text = String::new();
             
-            let (start, end) = if start.0 > end.0 || (start.0 == end.0 && start.1 > end.1) {
+            // Normalize selection order
+            let (norm_start, norm_end) = if start.0 > end.0 || (start.0 == end.0 && start.1 > end.1) {
                 (end, start)
             } else {
                 (start, end)
             };
 
-            for msg_idx in start.0..=end.0.min(self.messages.len().saturating_sub(1)) {
+            let max_msg_idx = self.messages.len().saturating_sub(1);
+            for msg_idx in norm_start.0..=norm_end.0.min(max_msg_idx) {
                 if let Some(msg) = self.messages.get(msg_idx) {
-                    if start.0 == end.0 {
+                    if norm_start.0 == norm_end.0 {
                         // Single line selection
-                        let start_char = start.1.min(msg.len());
-                        let end_char = end.1.min(msg.len());
-                        selected_text.push_str(&msg[start_char..end_char]);
-                    } else if msg_idx == start.0 {
+                        let start_char = norm_start.1.min(msg.len());
+                        let end_char = norm_end.1.min(msg.len()).max(start_char);
+                        if end_char > start_char {
+                            selected_text.push_str(&msg[start_char..end_char]);
+                        }
+                    } else if msg_idx == norm_start.0 {
                         // First line
-                        let start_char = start.1.min(msg.len());
+                        let start_char = norm_start.1.min(msg.len());
                         selected_text.push_str(&msg[start_char..]);
-                        selected_text.push('\n');
-                    } else if msg_idx == end.0 {
+                        if msg_idx < norm_end.0 {
+                            selected_text.push('\n');
+                        }
+                    } else if msg_idx == norm_end.0 {
                         // Last line
-                        let end_char = end.1.min(msg.len());
+                        let end_char = norm_end.1.min(msg.len());
                         selected_text.push_str(&msg[..end_char]);
                     } else {
                         // Middle lines
@@ -455,10 +520,25 @@ impl ChatUI {
             }
 
             if !selected_text.is_empty() {
-                let mut clipboard = Clipboard::new()?;
-                clipboard.set_text(selected_text)?;
-                self.messages.push("* Text copied to clipboard".to_string());
+                match Clipboard::new() {
+                    Ok(mut clipboard) => {
+                        match clipboard.set_text(selected_text) {
+                            Ok(_) => {
+                                self.messages.push("* Text copied to clipboard".to_string());
+                            }
+                            Err(e) => {
+                                self.messages.push(format!("* Error copying to clipboard: {}", e));
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        self.messages.push(format!("* Error accessing clipboard: {}", e));
+                    }
+                }
             }
+            
+            // Clear selection after copying
+            self.clear_selection();
         }
         Ok(())
     }
