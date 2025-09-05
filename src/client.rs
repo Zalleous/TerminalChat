@@ -26,7 +26,6 @@ pub async fn start_client(
 
     // Handle incoming messages from server
     let ui_tx = ui.get_sender();
-    let username_for_files = username.to_string();
     tokio::spawn(async move {
         let mut line = String::new();
         while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
@@ -34,7 +33,7 @@ pub async fn start_client(
             if !trimmed.is_empty() {
                 if let Ok(msg) = Message::from_json(trimmed) {
                     // Handle file messages and save them
-                    if let Message::File { filename, data, .. } = &msg {
+                    if let Message::File { filename, .. } = &msg {
                         use crate::file_transfer::FileTransfer;
                         match FileTransfer::save_file(&msg, "downloads") {
                             Ok(saved_path) => {

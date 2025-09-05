@@ -27,6 +27,24 @@ impl FileTransfer {
     }
 
     #[allow(dead_code)]
+    pub fn read_file_with_username(filepath: &str, username: &str) -> Result<Message, Box<dyn Error>> {
+        let path = Path::new(filepath);
+        
+        if !path.exists() {
+            return Err(format!("File not found: {}", filepath).into());
+        }
+
+        let filename = path.file_name()
+            .ok_or("Invalid filename")?
+            .to_string_lossy()
+            .to_string();
+
+        let data = fs::read(path)?;
+        
+        Ok(Message::new_file(username.to_string(), filename, data))
+    }
+
+    #[allow(dead_code)]
     pub fn save_file(msg: &Message, download_dir: &str) -> Result<String, Box<dyn Error>> {
         if let Message::File { filename, data, .. } = msg {
             let download_path = Path::new(download_dir);
