@@ -33,6 +33,9 @@ pub async fn start_client(
             if !trimmed.is_empty() {
                 if let Ok(msg) = Message::from_json(trimmed) {
                     let _ = ui_tx.send(msg);
+                } else {
+                    // If JSON parsing fails, treat as raw text (fallback)
+                    eprintln!("Failed to parse message: {}", trimmed);
                 }
             }
             line.clear();
