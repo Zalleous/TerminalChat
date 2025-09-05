@@ -144,21 +144,20 @@ impl ChatUI {
 
     fn add_message(&mut self, msg: Message) {
         let formatted = match msg {
-            Message::Text { username, content, timestamp } => {
-                format!("[{}] {}: {}", self.format_time(timestamp), username, content)
+            Message::Text { username, content, .. } => {
+                format!("{}: {}", username, content)
             }
-            Message::File { username, filename, size, timestamp, .. } => {
-                format!("[{}] {} shared file: {} ({} bytes)", 
-                    self.format_time(timestamp), username, filename, size)
+            Message::File { username, filename, size, .. } => {
+                format!("{} shared file: {} ({} bytes)", username, filename, size)
             }
-            Message::UserJoined { username, timestamp } => {
-                format!("[{}] * {} joined the chat", self.format_time(timestamp), username)
+            Message::UserJoined { username, .. } => {
+                format!("* {} joined the chat", username)
             }
-            Message::UserLeft { username, timestamp } => {
-                format!("[{}] * {} left the chat", self.format_time(timestamp), username)
+            Message::UserLeft { username, .. } => {
+                format!("* {} left the chat", username)
             }
-            Message::System { content, timestamp } => {
-                format!("[{}] * {}", self.format_time(timestamp), content)
+            Message::System { content, .. } => {
+                format!("* {}", content)
             }
         };
         
