@@ -7,6 +7,7 @@ use crossterm::{
 use std::error::Error;
 use std::io;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::process::Command;
 use tokio::sync::mpsc;
 use arboard::Clipboard;
 use glob::glob;
@@ -479,6 +480,101 @@ impl ChatUI {
         self.selecting = false;
     }
 
+    fn copy_to_system_clipboard(&self, text: &str) -> Result<(), Box<dyn Error>> {
+        // Try arboard first
+        match Clipboard::new() {
+            Ok(mut clipboard) => {
+                match clipboard.set_text(text.to_string()) {
+                    Ok(_) => return Ok(()),
+                    Err(e) => {
+                        eprintln!("Arboard clipboard failed: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Failed to create arboard clipboard: {}", e);
+            }
+        }
+
+        // Fallback to system commands
+        #[cfg(target_os = "linux")]
+        {
+            // Try xclip first
+            if let Ok(mut child) = Command::new("xclip")
+                .arg("-selection")
+                .arg("clipboard")
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    use std::io::Write;
+                    if stdin.write_all(text.as_bytes()).is_ok() {
+                        drop(stdin);
+                        if child.wait().is_ok() {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+
+            // Try xsel as fallback
+            if let Ok(mut child) = Command::new("xsel")
+                .arg("--clipboard")
+                .arg("--input")
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    use std::io::Write;
+                    if stdin.write_all(text.as_bytes()).is_ok() {
+                        drop(stdin);
+                        if child.wait().is_ok() {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            if let Ok(mut child) = Command::new("pbcopy")
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    use std::io::Write;
+                    if stdin.write_all(text.as_bytes()).is_ok() {
+                        drop(stdin);
+                        if child.wait().is_ok() {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            if let Ok(mut child) = Command::new("clip")
+                .stdin(std::process::Stdio::piped())
+                .spawn()
+            {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    use std::io::Write;
+                    if stdin.write_all(text.as_bytes()).is_ok() {
+                        drop(stdin);
+                        if child.wait().is_ok() {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+        }
+
+        Err("All clipboard methods failed".into())
+    }
+
     fn copy_selection(&mut self) -> Result<(), Box<dyn Error>> {
         if let (Some(start), Some(end)) = (self.selection_start, self.selection_end) {
             let mut selected_text = String::new();
@@ -520,25 +616,38 @@ impl ChatUI {
             }
 
             if !selected_text.is_empty() {
-                match Clipboard::new() {
-                    Ok(mut clipboard) => {
-                        match clipboard.set_text(selected_text) {
+                // Debug: show what we're trying to copy
+                let debug_text = if selected_text.len() > 50 {
+                    format!("{}...", &selected_text[..50])
+                } else {
+                    selected_text.clone()
+                };
+                
+                match self.copy_to_system_clipboard(&selected_text) {
+                    Ok(_) => {
+                        self.messages.push(format!("* Copied to clipboard: '{}'", debug_text));
+                    }
+                    Err(e) => {
+                        self.messages.push(format!("* Failed to copy to clipboard: {}", e));
+                        // Save to a temporary file as fallback
+                        match std::fs::write("/tmp/terminal_chat_selection.txt", &selected_text) {
                             Ok(_) => {
-                                self.messages.push("* Text copied to clipboard".to_string());
+                                self.messages.push("* Text saved to /tmp/terminal_chat_selection.txt".to_string());
                             }
-                            Err(e) => {
-                                self.messages.push(format!("* Error copying to clipboard: {}", e));
+                            Err(_) => {
+                                self.messages.push(format!("* Selected text: '{}'", debug_text));
                             }
                         }
                     }
-                    Err(e) => {
-                        self.messages.push(format!("* Error accessing clipboard: {}", e));
-                    }
                 }
+            } else {
+                self.messages.push("* No text selected to copy".to_string());
             }
             
             // Clear selection after copying
             self.clear_selection();
+        } else {
+            self.messages.push("* No text selected".to_string());
         }
         Ok(())
     }
