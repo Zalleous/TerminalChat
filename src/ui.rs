@@ -331,7 +331,9 @@ impl ChatUI {
                         self.test_clipboard_functionality()?;
                     } else {
                         // Send regular message
-                        let _ = self.message_sender.send(text);
+                        if let Err(e) = self.message_sender.send(text) {
+                            eprintln!("Failed to send message: {}", e);
+                        }
                     }
                 }
             }
@@ -367,11 +369,13 @@ impl ChatUI {
                 }
             }
             KeyCode::Char(c) if c.is_ascii_digit() => {
-                let index = c.to_digit(10).unwrap() as usize;
-                if index > 0 && index <= self.received_files.len() {
-                    self.file_viewer_index = Some(index - 1);
-                    self.mode = UIMode::FileViewer;
-                    self.scroll_offset = 0;
+                if let Some(digit) = c.to_digit(10) {
+                    let index = digit as usize;
+                    if index > 0 && index <= self.received_files.len() {
+                        self.file_viewer_index = Some(index - 1);
+                        self.mode = UIMode::FileViewer;
+                        self.scroll_offset = 0;
+                    }
                 }
             }
             KeyCode::Char('d') | KeyCode::Char('D') => {
@@ -595,8 +599,8 @@ impl ChatUI {
             Ok(mut clipboard) => {
                 match clipboard.set_text(text.to_string()) {
                     Ok(_) => {
-                        // Verify the clipboard content
-                        std::thread::sleep(std::time::Duration::from_millis(100));
+                        // Note: Removed sleep to avoid blocking async runtime
+                        // Clipboard verification may be less reliable but prevents UI freezes
                         match clipboard.get_text() {
                             Ok(clipboard_text) => {
                                 if clipboard_text == text {
@@ -693,16 +697,12 @@ impl ChatUI {
                     }
                     Err(e) => {
                         self.messages.push(format!("* Failed to copy to clipboard: {}", e));
-                        // Save to a temporary file as fallback
-                        let fallback_path = if cfg!(windows) {
-                            "C:\\temp\\terminal_chat_selection.txt"
-                        } else {
-                            "/tmp/terminal_chat_selection.txt"
-                        };
-                        
-                        match std::fs::write(fallback_path, &selected_text) {
+                        // Save to a temporary file as fallback using proper temp directory
+                        let fallback_path = std::env::temp_dir().join("terminal_chat_selection.txt");
+
+                        match std::fs::write(&fallback_path, &selected_text) {
                             Ok(_) => {
-                                self.messages.push(format!("* Text saved to {}", fallback_path));
+                                self.messages.push(format!("* Text saved to {}", fallback_path.display()));
                             }
                             Err(write_err) => {
                                 self.messages.push(format!("* Could not save to file: {}", write_err));
@@ -895,11 +895,19 @@ impl ChatUI {
             Ok(file_msg) => {
                 // Send the file message through the message sender
                 if let Ok(json) = file_msg.to_json() {
-                    let _ = self.message_sender.send(format!("FILE:{}", json));
+                    if let Err(e) = self.message_sender.send(format!("FILE:{}", json)) {
+                        eprintln!("Failed to send file message: {}", e);
+                        self.messages.push(format!("Error sending file: {}", e));
+                    } else {
+                        self.messages.push(format!("Sending file: {}", filepath));
+                    }
+                } else {
+                    eprintln!("Failed to serialize file message");
+                    self.messages.push("Error: Failed to serialize file message".to_string());
                 }
-                self.messages.push(format!("Sending file: {}", filepath));
             }
             Err(e) => {
+                eprintln!("Error reading file {}: {}", filepath, e);
                 self.messages.push(format!("Error reading file {}: {}", filepath, e));
             }
         }

@@ -28,29 +28,43 @@ pub async fn start_client(
     let ui_tx = ui.get_sender();
     tokio::spawn(async move {
         let mut line = String::new();
-        while reader.read_line(&mut line).await.unwrap_or(0) > 0 {
-            let trimmed = line.trim();
-            if !trimmed.is_empty() {
-                if let Ok(msg) = Message::from_json(trimmed) {
-                    // Handle file messages and save them
-                    if let Message::File { filename, .. } = &msg {
-                        use crate::file_transfer::FileTransfer;
-                        match FileTransfer::save_file(&msg, "downloads") {
-                            Ok(saved_path) => {
-                                println!("File saved to: {}", saved_path);
+        loop {
+            match reader.read_line(&mut line).await {
+                Ok(0) => {
+                    println!("Server closed connection");
+                    break;
+                }
+                Ok(_) => {
+                    let trimmed = line.trim();
+                    if !trimmed.is_empty() {
+                        if let Ok(msg) = Message::from_json(trimmed) {
+                            // Handle file messages and save them
+                            if let Message::File { filename, .. } = &msg {
+                                use crate::file_transfer::FileTransfer;
+                                match FileTransfer::save_file(&msg, "downloads") {
+                                    Ok(saved_path) => {
+                                        println!("File saved to: {}", saved_path);
+                                    }
+                                    Err(e) => {
+                                        eprintln!("Error saving file {}: {}", filename, e);
+                                    }
+                                }
                             }
-                            Err(e) => {
-                                eprintln!("Error saving file {}: {}", filename, e);
+                            if let Err(e) = ui_tx.send(msg) {
+                                eprintln!("Failed to send message to UI: {}", e);
                             }
+                        } else {
+                            // If JSON parsing fails, treat as raw text (fallback)
+                            eprintln!("Failed to parse message: {}", trimmed);
                         }
                     }
-                    let _ = ui_tx.send(msg);
-                } else {
-                    // If JSON parsing fails, treat as raw text (fallback)
-                    eprintln!("Failed to parse message: {}", trimmed);
+                    line.clear();
+                }
+                Err(e) => {
+                    eprintln!("Error reading from server: {}", e);
+                    break;
                 }
             }
-            line.clear();
         }
     });
 
@@ -58,7 +72,10 @@ pub async fn start_client(
     tokio::spawn(async move {
         while let Some(text) = rx.recv().await {
             // Send raw text instead of JSON to server
-            let _ = writer.write_all(format!("{}\n", text).as_bytes()).await;
+            if let Err(e) = writer.write_all(format!("{}\n", text).as_bytes()).await {
+                eprintln!("Failed to send message to server: {}", e);
+                break;
+            }
         }
     });
 

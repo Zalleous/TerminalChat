@@ -6,6 +6,8 @@ mod server;
 mod client;
 mod ui;
 mod file_transfer;
+mod validation;
+mod config;
 
 #[derive(Parser)]
 #[command(name = "terminal-chat")]
@@ -47,6 +49,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             server::start_server(port).await?;
         }
         Commands::Client { address, port, username } => {
+            // Validate username before connecting
+            validation::validate_username(&username)?;
             println!("Connecting to {}:{} as {}", address, port, username);
             client::start_client(&address, port, &username).await?;
         }
