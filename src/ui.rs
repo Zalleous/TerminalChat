@@ -122,8 +122,10 @@ impl ChatUI {
                     }
                     Event::Mouse(mouse) => {
                         if self.mode == UIMode::Chat {
-                            self.handle_mouse_event(mouse)?;
-                            needs_redraw = true; // Redraw after mouse event
+                            // Only redraw if mouse event requires it (not on simple moves)
+                            if self.handle_mouse_event(mouse)? {
+                                needs_redraw = true;
+                            }
                         }
                     }
                     _ => {}
@@ -430,20 +432,23 @@ impl ChatUI {
         Ok(false) // Don't exit
     }
 
-    fn handle_mouse_event(&mut self, mouse: MouseEvent) -> Result<(), Box<dyn Error>> {
-        match mouse.kind {
+    fn handle_mouse_event(&mut self, mouse: MouseEvent) -> Result<bool, Box<dyn Error>> {
+        let needs_redraw = match mouse.kind {
             MouseEventKind::Down(MouseButton::Left) => {
                 self.start_selection(mouse.column, mouse.row);
+                true // Redraw to show selection start
             }
             MouseEventKind::Drag(MouseButton::Left) => {
                 self.update_selection(mouse.column, mouse.row);
+                true // Redraw to show selection update
             }
             MouseEventKind::Up(MouseButton::Left) => {
                 self.end_selection();
+                true // Redraw to finalize selection
             }
-            _ => {}
-        }
-        Ok(())
+            _ => false // Don't redraw for mouse moves, scrolls, etc.
+        };
+        Ok(needs_redraw)
     }
 
     fn start_selection(&mut self, x: u16, y: u16) {
