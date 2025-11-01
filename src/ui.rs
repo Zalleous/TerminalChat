@@ -97,8 +97,14 @@ impl ChatUI {
     }
 
     async fn run_app(&mut self) -> Result<(), Box<dyn Error>> {
+        let mut needs_redraw = true;
+
         loop {
-            self.draw()?;
+            // Only redraw when necessary to prevent flickering
+            if needs_redraw {
+                self.draw()?;
+                needs_redraw = false;
+            }
 
             // Handle events with timeout
             if event::poll(Duration::from_millis(100))? {
@@ -109,6 +115,7 @@ impl ChatUI {
                             UIMode::FileViewer => self.handle_file_viewer_key(key)?,
                             UIMode::FileList => self.handle_file_list_key(key)?,
                         };
+                        needs_redraw = true; // Redraw after key press
                         if should_exit {
                             break;
                         }
@@ -116,6 +123,7 @@ impl ChatUI {
                     Event::Mouse(mouse) => {
                         if self.mode == UIMode::Chat {
                             self.handle_mouse_event(mouse)?;
+                            needs_redraw = true; // Redraw after mouse event
                         }
                     }
                     _ => {}
@@ -123,8 +131,13 @@ impl ChatUI {
             }
 
             // Handle incoming messages
+            let mut received_message = false;
             while let Ok(msg) = self.message_receiver.try_recv() {
                 self.add_message(msg);
+                received_message = true;
+            }
+            if received_message {
+                needs_redraw = true; // Redraw when new messages arrive
             }
         }
 
@@ -330,7 +343,15 @@ impl ChatUI {
                     } else if text.starts_with("/test-clipboard") {
                         self.test_clipboard_functionality()?;
                     } else {
-                        // Send regular message
+                        // Add message to local UI immediately
+                        let timestamp = SystemTime::now();
+                        let formatted_msg = format!("[{}] {}: {}",
+                            self.format_time(timestamp),
+                            self.username,
+                            text);
+                        self.messages.push(formatted_msg);
+
+                        // Then send to server
                         if let Err(e) = self.message_sender.send(text) {
                             eprintln!("Failed to send message: {}", e);
                         }
