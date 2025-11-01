@@ -1,4 +1,5 @@
 use crate::message::Message;
+use crate::config;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseEvent, MouseEventKind, MouseButton},
     execute,
@@ -247,13 +248,18 @@ impl ChatUI {
                 let content = String::from_utf8_lossy(&file.data);
                 let lines: Vec<&str> = content.lines().collect();
                 let display_height = height.saturating_sub(3) as usize;
-                
-                let start_line = self.scroll_offset;
+
+                // Ensure scroll_offset doesn't go past the end
+                let max_scroll = lines.len().saturating_sub(display_height);
+                let start_line = self.scroll_offset.min(max_scroll);
                 let end_line = (start_line + display_height).min(lines.len());
 
-                for (i, line) in lines[start_line..end_line].iter().enumerate() {
-                    execute!(io::stdout(), crossterm::cursor::MoveTo(0, (i + 2) as u16))?;
-                    print!("{}", line);
+                // Only iterate if we have valid range
+                if start_line < lines.len() && start_line <= end_line {
+                    for (i, line) in lines[start_line..end_line].iter().enumerate() {
+                        execute!(io::stdout(), crossterm::cursor::MoveTo(0, (i + 2) as u16))?;
+                        print!("{}", line);
+                    }
                 }
 
                 if lines.len() > display_height {
@@ -420,7 +426,21 @@ impl ChatUI {
                 }
             }
             KeyCode::Down => {
-                self.scroll_offset += 1;
+                // Get the file to check its length
+                if let Some(index) = self.file_viewer_index {
+                    if let Some(file) = self.received_files.get(index) {
+                        let content = String::from_utf8_lossy(&file.data);
+                        let lines: Vec<&str> = content.lines().collect();
+                        let (_, height) = crossterm::terminal::size().unwrap_or((80, 24));
+                        let display_height = height.saturating_sub(3) as usize;
+                        let max_scroll = lines.len().saturating_sub(display_height);
+
+                        // Only scroll down if we haven't reached the end
+                        if self.scroll_offset < max_scroll {
+                            self.scroll_offset += 1;
+                        }
+                    }
+                }
             }
             KeyCode::Char('d') | KeyCode::Char('D') => {
                 if let Some(index) = self.file_viewer_index {
@@ -820,7 +840,7 @@ impl ChatUI {
                 timestamp: SystemTime::now(),
             };
             
-            match FileTransfer::save_file(&msg, "downloads") {
+            match FileTransfer::save_file(&msg, config::DEFAULT_DOWNLOAD_DIR) {
                 Ok(path) => {
                     self.messages.push(format!("* File downloaded to: {}", path));
                 }

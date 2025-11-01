@@ -22,7 +22,7 @@ enum Commands {
     /// Start a chat server
     Server {
         /// Port to listen on
-        #[arg(short, long, default_value = "8080")]
+        #[arg(short, long, default_value_t = config::DEFAULT_PORT)]
         port: u16,
     },
     /// Connect to a chat server
@@ -31,7 +31,7 @@ enum Commands {
         #[arg(short, long, default_value = "127.0.0.1")]
         address: String,
         /// Server port to connect to
-        #[arg(short, long, default_value = "8080")]
+        #[arg(short, long, default_value_t = config::DEFAULT_PORT)]
         port: u16,
         /// Your username
         #[arg(short, long)]

@@ -176,7 +176,10 @@ async fn handle_client(
         }
 
         let mut clients_guard = clients_for_reader.lock().await;
-        clients_guard.remove(&sender_id);
+        if let Some(client_info) = clients_guard.remove(&sender_id) {
+            println!("Client {} ({}) removed from active clients list",
+                username_for_reader, client_info.username);
+        }
     });
 
     // Handle outgoing messages to this client

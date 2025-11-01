@@ -1,5 +1,6 @@
 use crate::message::Message;
 use crate::ui::ChatUI;
+use crate::config;
 use std::error::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
@@ -41,7 +42,7 @@ pub async fn start_client(
                             // Handle file messages and save them
                             if let Message::File { filename, .. } = &msg {
                                 use crate::file_transfer::FileTransfer;
-                                match FileTransfer::save_file(&msg, "downloads") {
+                                match FileTransfer::save_file(&msg, config::DEFAULT_DOWNLOAD_DIR) {
                                     Ok(saved_path) => {
                                         println!("File saved to: {}", saved_path);
                                     }
